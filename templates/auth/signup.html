@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign Up — CryptoPulse</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/auth.css">
+</head>
+<body class="auth-body">
+
+<div class="auth-bg">
+  <div class="auth-grid-overlay"></div>
+</div>
+
+<div class="auth-wrapper">
+
+  <!-- Left panel — branding -->
+  <div class="auth-brand">
+    <div class="auth-brand-inner">
+      <div class="brand-logo">⬡</div>
+      <div class="brand-name">CryptoPulse</div>
+      <div class="brand-tagline">Real-Time Pump &amp; Dump Detection</div>
+      <div class="brand-divider"></div>
+      <div class="brand-features">
+        <div class="brand-feature"><span class="bf-icon">◈</span> Monitor 10 top cryptocurrencies</div>
+        <div class="brand-feature"><span class="bf-icon">◉</span> Isolation Forest ML detection</div>
+        <div class="brand-feature"><span class="bf-icon">◧</span> NetworkX graph analysis</div>
+        <div class="brand-feature"><span class="bf-icon">◬</span> Personalised watchlist</div>
+      </div>
+      <div class="brand-note">
+        Join CryptoPulse and get instant access to real-time pump &amp; dump alerts across major cryptocurrency pairs.
+      </div>
+    </div>
+  </div>
+
+  <!-- Right panel — form -->
+  <div class="auth-form-panel">
+    <div class="auth-card">
+      <div class="auth-card-header">
+        <h1 class="auth-title">Create account</h1>
+        <p class="auth-subtitle">Start monitoring the market today</p>
+      </div>
+
+      {% if error %}
+      <div class="auth-alert auth-alert-error">
+        <span class="alert-icon-sm">⚠</span> {{ error }}
+      </div>
+      {% endif %}
+
+      <form method="POST" action="/signup" class="auth-form" autocomplete="on">
+
+        <div class="form-group">
+          <label class="form-label" for="username">Username</label>
+          <div class="input-wrapper">
+            <span class="input-icon">◈</span>
+            <input type="text" id="username" name="username" class="form-input"
+              placeholder="Choose a username (min. 3 chars)" required minlength="3"
+              autocomplete="username"
+              value="{{ request.form.get('username', '') }}">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="email">Email Address</label>
+          <div class="input-wrapper">
+            <span class="input-icon">◉</span>
+            <input type="email" id="email" name="email" class="form-input"
+              placeholder="you@example.com" required autocomplete="email"
+              value="{{ request.form.get('email', '') }}">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="password">Password</label>
+          <div class="input-wrapper">
+            <span class="input-icon">◧</span>
+            <input type="password" id="password" name="password" class="form-input"
+              placeholder="At least 6 characters" required minlength="6"
+              autocomplete="new-password">
+            <button type="button" class="input-eye" onclick="togglePwd('password',this)">◎</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="password2">Confirm Password</label>
+          <div class="input-wrapper">
+            <span class="input-icon">◧</span>
+            <input type="password" id="password2" name="password2" class="form-input"
+              placeholder="Repeat your password" required autocomplete="new-password">
+            <button type="button" class="input-eye" onclick="togglePwd('password2',this)">◎</button>
+          </div>
+          <div id="pwd-match" class="form-hint"></div>
+        </div>
+
+        <!-- Password strength bar -->
+        <div class="pwd-strength-wrap">
+          <div class="pwd-strength-bar" id="pwdBar">
+            <div class="pwd-strength-fill" id="pwdFill"></div>
+          </div>
+          <span class="pwd-strength-label" id="pwdLabel"></span>
+        </div>
+
+        <div class="form-check-row">
+          <label class="form-check">
+            <input type="checkbox" name="terms" required>
+            <span class="check-box"></span>
+            <span class="check-label">I agree to the <a href="#" class="auth-link">Terms of Service</a></span>
+          </label>
+        </div>
+
+        <button type="submit" class="auth-btn auth-btn-primary">
+          <span>Create Account</span>
+          <span class="btn-arrow">→</span>
+        </button>
+      </form>
+
+      <div class="auth-divider"><span>OR</span></div>
+
+      <div class="auth-footer-text">
+        Already have an account?
+        <a href="/login" class="auth-link">Sign in</a>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function togglePwd(id, btn) {
+  const inp = document.getElementById(id);
+  inp.type = (inp.type === 'password') ? 'text' : 'password';
+  btn.textContent = (inp.type === 'text') ? '◉' : '◎';
+}
+
+// Password strength
+document.getElementById('password').addEventListener('input', function() {
+  const v = this.value;
+  let score = 0;
+  if (v.length >= 6)  score++;
+  if (v.length >= 10) score++;
+  if (/[A-Z]/.test(v)) score++;
+  if (/[0-9]/.test(v)) score++;
+  if (/[^A-Za-z0-9]/.test(v)) score++;
+  const fill  = document.getElementById('pwdFill');
+  const label = document.getElementById('pwdLabel');
+  const pcts  = ['0%','20%','40%','65%','85%','100%'];
+  const colors= ['','#ff3366','#ff8800','#ffe066','#00d4ff','#00ff88'];
+  const labels= ['','Weak','Fair','Good','Strong','Very Strong'];
+  fill.style.width = pcts[score];
+  fill.style.background = colors[score];
+  label.textContent = labels[score];
+  label.style.color = colors[score];
+});
+
+// Password match indicator
+document.getElementById('password2').addEventListener('input', function() {
+  const p1 = document.getElementById('password').value;
+  const el = document.getElementById('pwd-match');
+  if (!this.value) { el.textContent = ''; return; }
+  if (p1 === this.value) { el.textContent = '✓ Passwords match'; el.style.color = 'var(--green)'; }
+  else                   { el.textContent = '✗ Passwords do not match'; el.style.color = 'var(--red)'; }
+});
+</script>
+</body>
+</html>

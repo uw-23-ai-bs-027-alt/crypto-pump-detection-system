@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}My Profile — CryptoPulse{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <div class="page-title">MY PROFILE</div>
+    <div class="page-subtitle">ACCOUNT SETTINGS &amp; PREFERENCES</div>
+  </div>
+  <div class="topbar-right">
+    <div class="avatar-circle large">{{ user.avatar_initials }}</div>
+    <div>
+      <div style="font-family:var(--font-head);font-size:16px;font-weight:700;color:var(--text-bright);">{{ user.username }}</div>
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);">{{ user.role|upper }}</div>
+    </div>
+  </div>
+</div>
+
+{% if message %}
+<div class="auth-msg auth-msg-{{ msg_type }}">
+  {{ '✓' if msg_type == 'success' else '⚠' }} {{ message }}
+</div>
+{% endif %}
+
+<!-- Stats row -->
+<div class="stats-grid mb-24" style="grid-template-columns:repeat(3,1fr)">
+  <div class="stat-card cyan">
+    <div class="stat-label">Account Role</div>
+    <div class="stat-value" style="font-size:20px">{{ user.role|upper }}</div>
+    <div class="stat-meta">{{ 'Full access' if user.is_admin else 'Standard access' }}</div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-label">Watchlist Coins</div>
+    <div class="stat-value">{{ user.watchlist_list|length }}</div>
+    <div class="stat-meta">Tracked assets</div>
+  </div>
+  <div class="stat-card orange">
+    <div class="stat-label">Member Since</div>
+    <div class="stat-value" style="font-size:16px">{{ user.created_at[:10] }}</div>
+    <div class="stat-meta">UTC registration date</div>
+  </div>
+</div>
+
+<div class="grid-2 mb-24">
+
+  <!-- Profile settings -->
+  <div class="card">
+    <div class="card-title">◈ Account Information</div>
+    <form method="POST" action="/profile">
+      <input type="hidden" name="action" value="update_profile">
+
+      <div class="form-group-inline">
+        <label class="form-label-sm">Username</label>
+        <input type="text" name="username" class="form-input-sm"
+               value="{{ user.username }}" minlength="3">
+      </div>
+
+      <div class="form-group-inline">
+        <label class="form-label-sm">Email</label>
+        <input type="email" name="email" class="form-input-sm"
+               value="{{ user.email }}">
+      </div>
+
+      <div class="form-group-inline">
+        <label class="form-label-sm">Email Alerts</label>
+        <label class="toggle-wrap">
+          <input type="checkbox" name="alert_email" value="1"
+                 {{ 'checked' if user.alert_email else '' }}>
+          <span class="toggle-slider"></span>
+          <span class="toggle-text">{{ 'Enabled' if user.alert_email else 'Disabled' }}</span>
+        </label>
+      </div>
+
+      <button type="submit" class="save-btn">Save Changes</button>
+    </form>
+  </div>
+
+  <!-- Password change -->
+  <div class="card">
+    <div class="card-title">◧ Change Password</div>
+    <form method="POST" action="/profile">
+      <input type="hidden" name="action" value="change_password">
+
+      <div class="form-group-inline">
+        <label class="form-label-sm">Current Password</label>
+        <input type="password" name="current_password" class="form-input-sm"
+               placeholder="••••••••" required>
+      </div>
+
+      <div class="form-group-inline">
+        <label class="form-label-sm">New Password</label>
+        <input type="password" name="new_password" class="form-input-sm"
+               placeholder="Min. 6 characters" required minlength="6">
+      </div>
+
+      <div class="pwd-strength-wrap" style="margin:8px 0 14px">
+        <div class="pwd-strength-bar">
+          <div class="pwd-strength-fill" id="pwdFill2"></div>
+        </div>
+      </div>
+
+      <button type="submit" class="save-btn save-btn-orange">Update Password</button>
+    </form>
+  </div>
+</div>
+
+<!-- Watchlist -->
+<div class="card mb-24">
+  <div class="card-title">◉ My Watchlist</div>
+  <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px">
+    Select the coins you want to track. Your watchlist personalises your dashboard view.
+  </p>
+  <form method="POST" action="/profile" id="watchlistForm">
+    <input type="hidden" name="action" value="update_profile">
+    <input type="hidden" name="email" value="{{ user.email }}">
+    <div class="watchlist-grid" id="watchlistGrid">
+      {% for coin_id, sym in tracked %}
+      <label class="coin-toggle {{ 'active' if coin_id in user.watchlist else '' }}">
+        <input type="checkbox" name="watchlist_coins" value="{{ coin_id }}"
+               {{ 'checked' if coin_id in user.watchlist else '' }}
+               onchange="updateWatchlistInput()">
+        <span class="ct-sym">{{ sym }}</span>
+        <span class="ct-name">{{ coin_id.replace('-2','').replace('binancecoin','BNB').capitalize() }}</span>
+        <span class="ct-check">✓</span>
+      </label>
+      {% endfor %}
+    </div>
+    <input type="hidden" name="watchlist" id="watchlistInput" value="{{ user.watchlist }}">
+    <div style="margin-top:16px;display:flex;gap:12px;align-items:center">
+      <button type="submit" class="save-btn">Save Watchlist</button>
+      <span style="font-size:12px;font-family:var(--font-mono);color:var(--text-dim)" id="watchlistCount">
+        {{ user.watchlist_list|length }} coin(s) selected
+      </span>
+    </div>
+  </form>
+</div>
+
+<!-- Account actions -->
+<div class="card">
+  <div class="card-title">◬ Account Actions</div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap">
+    <a href="/" class="action-btn action-btn-blue">◈ Go to Dashboard</a>
+    <a href="/alerts" class="action-btn action-btn-orange">◬ View My Alerts</a>
+    {% if current_user.is_admin %}
+    <a href="/admin" class="action-btn action-btn-purple">⬡ Admin Panel</a>
+    {% endif %}
+    <a href="/logout" class="action-btn action-btn-red">✕ Sign Out</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function updateWatchlistInput() {
+  const checked = [...document.querySelectorAll('input[name="watchlist_coins"]:checked')]
+                    .map(i => i.value);
+  document.getElementById('watchlistInput').value = checked.join(',');
+  document.getElementById('watchlistCount').textContent = checked.length + ' coin(s) selected';
+  document.querySelectorAll('.coin-toggle').forEach(el => {
+    el.classList.toggle('active', el.querySelector('input').checked);
+  });
+}
+
+// Password strength for change password form
+document.querySelector('input[name="new_password"]').addEventListener('input', function(){
+  const v = this.value; let score = 0;
+  if(v.length>=6) score++; if(v.length>=10) score++;
+  if(/[A-Z]/.test(v)) score++; if(/[0-9]/.test(v)) score++;
+  if(/[^A-Za-z0-9]/.test(v)) score++;
+  const colors=['','#ff3366','#ff8800','#ffe066','#00d4ff','#00ff88'];
+  const f = document.getElementById('pwdFill2');
+  f.style.width = (score*20)+'%'; f.style.background = colors[score];
+});
+</script>
+{% endblock %}

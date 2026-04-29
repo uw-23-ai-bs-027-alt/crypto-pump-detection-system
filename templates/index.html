@@ -1,0 +1,360 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — CryptoPulse{% endblock %}
+
+{% block content %}
+<!-- Ticker bar -->
+<div class="ticker-bar" id="tickerBar">
+  <div class="ticker-inner" id="tickerInner">
+    {% for coin in latest %}
+    <span class="ticker-item">
+      <span class="ticker-sym">{{ coin.symbol }}</span>
+      <span class="ticker-price">${{ "%.4f"|format(coin.price) }}</span>
+      <span class="{{ 'pct-pos' if coin.price_change_pct >= 0 else 'pct-neg' }}">
+        {{ "%+.2f"|format(coin.price_change_pct) }}%
+      </span>
+    </span>
+    {% endfor %}
+    <!-- duplicate for infinite scroll -->
+    {% for coin in latest %}
+    <span class="ticker-item">
+      <span class="ticker-sym">{{ coin.symbol }}</span>
+      <span class="ticker-price">${{ "%.4f"|format(coin.price) }}</span>
+      <span class="{{ 'pct-pos' if coin.price_change_pct >= 0 else 'pct-neg' }}">
+        {{ "%+.2f"|format(coin.price_change_pct) }}%
+      </span>
+    </span>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Top bar -->
+<div class="topbar" style="margin-top:20px;">
+  <div>
+    <div class="page-title">MARKET SURVEILLANCE</div>
+    <div class="page-subtitle">REAL-TIME PUMP &amp; DUMP DETECTION ENGINE</div>
+  </div>
+  <div class="topbar-right">
+    <span class="badge-live">● LIVE</span>
+    <span class="clock"></span>
+    <button class="refresh-btn" id="refreshBtn" onclick="refreshDashboard()">↻ REFRESH</button>
+  </div>
+</div>
+
+<!-- Stat cards -->
+<div class="stats-grid mb-24">
+  <div class="stat-card cyan">
+    <div class="stat-label">Coins Tracked</div>
+    <div class="stat-value" id="coinsTracked">{{ latest|length }}</div>
+    <div class="stat-meta">Active market feeds</div>
+  </div>
+  <div class="stat-card red">
+    <div class="stat-label">Total Alerts</div>
+    <div class="stat-value" id="totalAlerts">{{ stats.total }}</div>
+    <div class="stat-meta">{{ stats.pumps }} pumps · {{ stats.dumps }} dumps</div>
+  </div>
+  <div class="stat-card orange">
+    <div class="stat-label">High Severity</div>
+    <div class="stat-value" id="highSeverity">{{ stats.high_severity }}</div>
+    <div class="stat-meta">Require immediate review</div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-label">Most Alerted</div>
+    <div class="stat-value" style="font-size:22px;" id="mostAlerted">{{ stats.most_alerted_coin }}</div>
+    <div class="stat-meta">Highest anomaly count</div>
+  </div>
+</div>
+
+<!-- Market table + Recent alerts -->
+<div class="grid-2 mb-24">
+  <!-- Live prices table -->
+  <div class="card">
+    <div class="card-title">◈ Live Market Snapshot</div>
+    <table class="price-table" id="priceTable">
+      <thead>
+        <tr>
+          <th>Asset</th>
+          <th>Price (USD)</th>
+          <th>24h %</th>
+          <th>Volume</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="priceTableBody">
+        {% for coin in latest %}
+        <tr>
+          <td>
+            <div class="coin-symbol">{{ coin.symbol }}</div>
+            <div class="coin-name">{{ coin.name }}</div>
+          </td>
+          <td class="price-val">${{ "%.4f"|format(coin.price) }}</td>
+          <td class="{{ 'pct-pos' if coin.price_change_pct >= 0 else 'pct-neg' }}">
+            {{ "%+.2f"|format(coin.price_change_pct) }}%
+          </td>
+          <td class="vol-val">{{ "${:,.0f}".format(coin.volume_24h) }}</td>
+          <td><span class="badge badge-clean">NORMAL</span></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="empty-state">Loading market data…</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Recent alerts -->
+  <div class="card">
+    <div class="card-title">◬ Recent Alerts</div>
+    <div id="recentAlerts">
+      {% for alert in top_alerts %}
+      <div class="alert-item {{ alert.alert_type|lower }}-alert">
+        <span class="alert-icon">
+          {% if alert.alert_type == 'PUMP' %}🚀
+          {% elif alert.alert_type == 'DUMP' %}📉
+          {% else %}⚠️{% endif %}
+        </span>
+        <div>
+          <div class="alert-msg">{{ alert.message }}</div>
+          <div class="alert-meta">
+            <span class="badge badge-{{ alert.severity }}">{{ alert.severity }}</span>
+            <span class="badge {{ 'badge-pump' if alert.alert_type == 'PUMP' else 'badge-dump' if alert.alert_type == 'DUMP' else 'badge-anom' }}">
+              {{ alert.alert_type }}
+            </span>
+          </div>
+          <div class="alert-time">{{ alert.timestamp[:16] }}</div>
+        </div>
+      </div>
+      {% else %}
+      <div class="empty-state">No alerts yet. Data is being analysed…</div>
+      {% endfor %}
+    </div>
+    <div style="margin-top:12px;">
+      <a href="/alerts" style="color:var(--cyan);font-family:var(--font-mono);font-size:12px;text-decoration:none;">
+        → View all alerts
+      </a>
+    </div>
+  </div>
+</div>
+
+<!-- Price overview chart -->
+<div class="card mb-24">
+  <div class="card-title">◧ Price Overview — BTC / ETH / SOL</div>
+  <div class="chart-container" style="height:300px;">
+    <canvas id="overviewChart"></canvas>
+  </div>
+</div>
+
+<!-- Volume + anomaly mini charts -->
+<div class="grid-3">
+  <div class="card">
+    <div class="card-title">◉ BTC Anomaly Score</div>
+    <div class="chart-container" style="height:160px;">
+      <canvas id="btcAnomalyChart"></canvas>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">◉ ETH Volume Trend</div>
+    <div class="chart-container" style="height:160px;">
+      <canvas id="ethVolumeChart"></canvas>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">◉ Alert Distribution</div>
+    <div class="chart-container" style="height:160px;">
+      <canvas id="alertDistChart"></canvas>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Chart defaults ──────────────────────────────────────────────────────────
+Chart.defaults.color = '#5a7a9a';
+Chart.defaults.borderColor = 'rgba(0,212,255,0.08)';
+Chart.defaults.font.family = "'Share Tech Mono', monospace";
+Chart.defaults.font.size = 11;
+
+const CYAN   = '#00d4ff';
+const GREEN  = '#00ff88';
+const RED    = '#ff3366';
+const ORANGE = '#ff8800';
+
+let overviewChart, btcChart, ethChart, alertChart;
+
+// ── Load overview chart (BTC + ETH + SOL) ───────────────────────────────────
+async function loadOverviewChart() {
+  const coins = ['bitcoin','ethereum','solana'];
+  const colors = [CYAN, GREEN, ORANGE];
+  const labels_ref = [];
+  const datasets = [];
+
+  for (let i = 0; i < coins.length; i++) {
+    const resp = await fetch(`/api/historical/${coins[i]}?limit=40`);
+    const data = await resp.json();
+    if (!data.length) continue;
+    const ts  = data.map(d => d.timestamp.substr(11,5));
+    const prices = data.map(d => d.price);
+    if (!labels_ref.length) labels_ref.push(...ts);
+    datasets.push({
+      label: coins[i].toUpperCase().replace('-2',''),
+      data: prices,
+      borderColor: colors[i],
+      backgroundColor: colors[i] + '18',
+      borderWidth: 1.5,
+      pointRadius: 0,
+      tension: 0.4,
+      fill: i === 0,
+    });
+  }
+
+  const ctx = document.getElementById('overviewChart').getContext('2d');
+  overviewChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: labels_ref, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top', labels: { usePointStyle: true, pointStyleWidth: 10 } },
+        tooltip: { backgroundColor: '#0d1421', borderColor: '#00d4ff44', borderWidth: 1 }
+      },
+      scales: {
+        x: { grid: { color: 'rgba(0,212,255,0.04)' }, ticks: { maxTicksLimit: 8 } },
+        y: { grid: { color: 'rgba(0,212,255,0.06)' }, ticks: { maxTicksLimit: 5 } }
+      }
+    }
+  });
+}
+
+// ── BTC anomaly score sparkline ─────────────────────────────────────────────
+async function loadBtcAnomalyChart() {
+  const resp = await fetch('/api/anomalies/bitcoin');
+  const data = await resp.json();
+  if (!data.series) return;
+  const { timestamps, prices, anomaly_flags } = data.series;
+  const shortTs = timestamps.slice(-30).map(t => t.substr(11,5));
+  const pts = prices.slice(-30);
+  const flags = anomaly_flags.slice(-30);
+
+  const pointColors = flags.map(f => f ? RED : 'transparent');
+  const pointRadius = flags.map(f => f ? 5 : 0);
+
+  const ctx = document.getElementById('btcAnomalyChart').getContext('2d');
+  btcChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: shortTs,
+      datasets: [{
+        label: 'BTC Price',
+        data: pts,
+        borderColor: CYAN,
+        backgroundColor: 'transparent',
+        borderWidth: 1.5,
+        pointBackgroundColor: pointColors,
+        pointBorderColor: pointColors,
+        pointRadius: pointRadius,
+        tension: 0.3,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { backgroundColor: '#0d1421', borderColor: '#00d4ff44', borderWidth: 1 } },
+      scales: {
+        x: { display: false },
+        y: { grid: { color: 'rgba(0,212,255,0.06)' }, ticks: { maxTicksLimit: 4 } }
+      }
+    }
+  });
+}
+
+// ── ETH volume sparkline ─────────────────────────────────────────────────────
+async function loadEthVolumeChart() {
+  const resp = await fetch('/api/historical/ethereum?limit=30');
+  const data = await resp.json();
+  const labels = data.map(d => d.timestamp.substr(11,5));
+  const vols   = data.map(d => d.volume_24h);
+
+  const ctx = document.getElementById('ethVolumeChart').getContext('2d');
+  ethChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Volume',
+        data: vols,
+        backgroundColor: vols.map(v => {
+          const avg = vols.reduce((a,b)=>a+b,0)/vols.length;
+          return v > avg * 2 ? RED + 'bb' : CYAN + '55';
+        }),
+        borderWidth: 0,
+        borderRadius: 2,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { display: false },
+        y: { grid: { color: 'rgba(0,212,255,0.04)' }, ticks: { maxTicksLimit: 3, callback: v => '$'+d3fmt(v) } }
+      }
+    }
+  });
+}
+
+function d3fmt(v) {
+  if (v >= 1e9) return (v/1e9).toFixed(1)+'B';
+  if (v >= 1e6) return (v/1e6).toFixed(1)+'M';
+  if (v >= 1e3) return (v/1e3).toFixed(0)+'K';
+  return v;
+}
+
+// ── Alert distribution donut ─────────────────────────────────────────────────
+async function loadAlertDistChart() {
+  const resp = await fetch('/api/alerts?limit=1');
+  const data = await resp.json();
+  const s = data.stats;
+  const other = Math.max(0, s.total - s.pumps - s.dumps);
+
+  const ctx = document.getElementById('alertDistChart').getContext('2d');
+  alertChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Pumps', 'Dumps', 'Anomalies'],
+      datasets: [{
+        data: [s.pumps || 0, s.dumps || 0, other || 0],
+        backgroundColor: [RED+'cc', ORANGE+'cc', '#ffe066cc'],
+        borderColor: '#0d1421',
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      cutout: '65%',
+      plugins: {
+        legend: { position: 'bottom', labels: { usePointStyle: true } },
+        tooltip: { backgroundColor: '#0d1421', borderColor: '#00d4ff44', borderWidth: 1 }
+      }
+    }
+  });
+}
+
+// ── Auto refresh every 30s ───────────────────────────────────────────────────
+function refreshDashboard() {
+  const btn = document.getElementById('refreshBtn');
+  btn.textContent = '↻ LOADING…';
+  btn.classList.add('spinning');
+  setTimeout(() => location.reload(), 500);
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+(async () => {
+  await loadOverviewChart();
+  await loadBtcAnomalyChart();
+  await loadEthVolumeChart();
+  await loadAlertDistChart();
+})();
+
+// Auto refresh every 30s
+setTimeout(() => location.reload(), 30000);
+</script>
+{% endblock %}

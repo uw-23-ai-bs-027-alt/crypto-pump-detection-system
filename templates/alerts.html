@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}Alerts — CryptoPulse{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <div class="page-title">ALERT CENTRE</div>
+    <div class="page-subtitle">PUMP &amp; DUMP EVENTS · ANOMALY LOG</div>
+  </div>
+  <div class="topbar-right">
+    <span class="clock"></span>
+    <button class="refresh-btn" onclick="location.reload()">↻ REFRESH</button>
+  </div>
+</div>
+
+<!-- Stats row -->
+<div class="stats-grid mb-24">
+  <div class="stat-card red">
+    <div class="stat-label">Total Alerts</div>
+    <div class="stat-value">{{ stats.total }}</div>
+    <div class="stat-meta">All time</div>
+  </div>
+  <div class="stat-card orange">
+    <div class="stat-label">Pump Events</div>
+    <div class="stat-value">{{ stats.pumps }}</div>
+    <div class="stat-meta">🚀 Price + volume spikes</div>
+  </div>
+  <div class="stat-card cyan">
+    <div class="stat-label">Dump Events</div>
+    <div class="stat-value">{{ stats.dumps }}</div>
+    <div class="stat-meta">📉 Sharp price drops</div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-label">Most Alerted</div>
+    <div class="stat-value" style="font-size:22px;">{{ stats.most_alerted_coin }}</div>
+    <div class="stat-meta">Highest frequency coin</div>
+  </div>
+</div>
+
+<!-- Filter bar -->
+<div class="card mb-24" style="padding:14px 20px;">
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);letter-spacing:2px;">FILTER:</span>
+    <a href="/alerts"             class="coin-btn {% if not severity %}active{% endif %}">ALL</a>
+    <a href="/alerts?severity=high"   class="coin-btn {% if severity=='high' %}active{% endif %}">HIGH</a>
+    <a href="/alerts?severity=medium" class="coin-btn {% if severity=='medium' %}active{% endif %}">MEDIUM</a>
+
+    <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);letter-spacing:2px;margin-left:12px;">TYPE:</span>
+    {% for coin_id, sym in tracked %}
+    <a href="/alerts?coin={{ coin_id }}" class="coin-btn" style="font-size:11px;">{{ sym }}</a>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Alert timeline chart -->
+<div class="card mb-24">
+  <div class="card-title">◈ Alert Timeline</div>
+  <div class="chart-container" style="height:200px;">
+    <canvas id="alertTimelineChart"></canvas>
+  </div>
+</div>
+
+<!-- Alerts list -->
+<div class="card">
+  <div class="card-title">◬ Alert Log
+    <span style="margin-left:8px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim);">
+      ({{ alerts|length }} records)
+    </span>
+  </div>
+
+  {% if alerts %}
+    {% for alert in alerts %}
+    <div class="alert-item {{ alert.alert_type|lower }}-alert">
+      <span class="alert-icon">
+        {% if alert.alert_type == 'PUMP' %}🚀
+        {% elif alert.alert_type == 'DUMP' %}📉
+        {% else %}⚠️{% endif %}
+      </span>
+      <div style="flex:1;">
+        <div class="alert-msg">{{ alert.message }}</div>
+        <div class="alert-meta">
+          <span class="badge {{ 'badge-pump' if alert.alert_type == 'PUMP' else 'badge-dump' if alert.alert_type == 'DUMP' else 'badge-anom' }}">
+            {{ alert.alert_type }}
+          </span>
+          <span class="badge badge-{{ alert.severity }}">{{ alert.severity }}</span>
+          <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);">
+            Price: ${{ "%.4f"|format(alert.price or 0) }}
+          </span>
+          <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);">
+            Vol: {{ "${:,.0f}".format(alert.volume or 0) }}
+          </span>
+        </div>
+      </div>
+      <div class="alert-time" style="min-width:110px;text-align:right;">
+        {{ alert.timestamp[:16] }}
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="empty-state">
+      <div style="font-size:40px;margin-bottom:16px;">◈</div>
+      No alerts found for the selected filter.<br>
+      <a href="/analytics" style="color:var(--cyan);font-family:var(--font-mono);font-size:12px;text-decoration:none;">
+        → Run analytics to generate alerts
+      </a>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+Chart.defaults.color = '#5a7a9a';
+Chart.defaults.borderColor = 'rgba(0,212,255,0.08)';
+Chart.defaults.font.family = "'Share Tech Mono', monospace";
+Chart.defaults.font.size = 11;
+
+const CYAN = '#00d4ff', RED = '#ff3366', ORANGE = '#ff8800';
+
+// Build timeline from alert data on page
+const alerts = {{ alerts | tojson }};
+
+if (alerts.length) {
+  // Group by hour
+  const hourCounts = {};
+  alerts.forEach(a => {
+    const hour = a.timestamp.substr(0,13).replace('T',' ')+'h';
+    if (!hourCounts[hour]) hourCounts[hour] = { pump:0, dump:0, anom:0 };
+    if (a.alert_type === 'PUMP') hourCounts[hour].pump++;
+    else if (a.alert_type === 'DUMP') hourCounts[hour].dump++;
+    else hourCounts[hour].anom++;
+  });
+
+  const labels = Object.keys(hourCounts).slice(-24);
+  const pumps  = labels.map(l => hourCounts[l]?.pump || 0);
+  const dumps  = labels.map(l => hourCounts[l]?.dump || 0);
+  const anoms  = labels.map(l => hourCounts[l]?.anom || 0);
+
+  new Chart(document.getElementById('alertTimelineChart').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Pumps',    data: pumps, backgroundColor: RED+'bb',    borderRadius:2, borderWidth:0 },
+        { label: 'Dumps',    data: dumps, backgroundColor: ORANGE+'bb', borderRadius:2, borderWidth:0 },
+        { label: 'Anomalies',data: anoms, backgroundColor: '#ffe066bb', borderRadius:2, borderWidth:0 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position:'top', labels:{usePointStyle:true} },
+        tooltip: { backgroundColor: '#0d1421', borderColor: '#00d4ff44', borderWidth: 1 }
+      },
+      scales: {
+        x: { stacked: true, grid:{display:false}, ticks:{maxTicksLimit:8, maxRotation:0} },
+        y: { stacked: true, grid:{color:'rgba(0,212,255,0.04)'}, ticks:{maxTicksLimit:5, stepSize:1} }
+      }
+    }
+  });
+} else {
+  document.getElementById('alertTimelineChart').parentElement.innerHTML =
+    '<div class="empty-state">No timeline data yet — run analytics to generate alerts.</div>';
+}
+</script>
+{% endblock %}

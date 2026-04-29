@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+{% block title %}Live Feed — CryptoPulse{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <div class="page-title">LIVE MARKET FEED</div>
+    <div class="page-subtitle">AUTO-REFRESHING EVERY 15 SECONDS</div>
+  </div>
+  <div class="topbar-right">
+    <span class="badge-live">● STREAMING</span>
+    <span class="clock"></span>
+  </div>
+</div>
+
+<!-- Countdown bar -->
+<div style="margin-bottom:20px;display:flex;align-items:center;gap:12px;">
+  <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);">NEXT REFRESH IN:</span>
+  <div style="flex:1;max-width:200px;background:var(--bg-card);border:1px solid var(--border);border-radius:3px;height:6px;overflow:hidden;">
+    <div id="countdownBar" style="height:100%;background:var(--cyan);transition:width 1s linear;width:100%;"></div>
+  </div>
+  <span id="countdownNum" style="font-family:var(--font-mono);font-size:11px;color:var(--cyan);">15s</span>
+</div>
+
+<!-- Live grid -->
+<div id="liveGrid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:24px;">
+  <!-- Populated by JS -->
+</div>
+
+<!-- Live charts row -->
+<div class="grid-2 mb-24">
+  <div class="card">
+    <div class="card-title" id="chartTitle1">◉ BTC — Price (Live)</div>
+    <div class="coin-selector" id="priceChartSelector"></div>
+    <div class="chart-container"><canvas id="livePrice"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="card-title" id="chartTitle2">◉ BTC — Volume (Live)</div>
+    <div class="chart-container"><canvas id="liveVolume"></canvas></div>
+  </div>
+</div>
+
+<!-- Recent anomaly table -->
+<div class="card">
+  <div class="card-title">◧ Recent Anomaly Events</div>
+  <table class="price-table">
+    <thead>
+      <tr>
+        <th>Coin</th><th>Time</th><th>Price</th><th>Volume</th>
+        <th>Price Z-Score</th><th>Vol Z-Score</th><th>Type</th><th>Severity</th>
+      </tr>
+    </thead>
+    <tbody id="anomalyTable">
+      <tr><td colspan="8" class="empty-state">Analysing… please wait</td></tr>
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+Chart.defaults.color = '#5a7a9a';
+Chart.defaults.borderColor = 'rgba(0,212,255,0.08)';
+Chart.defaults.font.family = "'Share Tech Mono', monospace";
+Chart.defaults.font.size = 11;
+
+const CYAN = '#00d4ff', GREEN = '#00ff88', RED = '#ff3366', ORANGE = '#ff8800';
+const COINS = {{ tracked | tojson }};
+let selectedCoin = 'bitcoin';
+let pChart, vChart;
+
+// ── Live coin cards ──────────────────────────────────────────────────────────
+async function loadLiveGrid() {
+  const resp = await fetch('/api/live');
+  const data = await resp.json();
+  const grid = document.getElementById('liveGrid');
+  grid.innerHTML = '';
+  data.forEach(c => {
+    const isPos = c.price_change_pct >= 0;
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.cssText = 'padding:16px;cursor:pointer;';
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px;">
+        <span style="font-family:var(--font-mono);color:var(--cyan);font-size:14px;font-weight:bold;">${c.symbol}</span>
+        <span class="badge ${isPos ? 'badge-clean' : 'badge-dump'}" style="font-size:9px;">
+          ${isPos ? '▲' : '▼'} ${Math.abs(c.price_change_pct).toFixed(2)}%
+        </span>
+      </div>
+      <div style="font-family:var(--font-mono);font-size:16px;color:var(--text-bright);margin-bottom:4px;">
+        $${formatPrice(c.price)}
+      </div>
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);">
+        Vol: ${fmtBig(c.volume_24h)}
+      </div>
+      <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:2px;">
+        MCap: ${fmtBig(c.market_cap)}
+      </div>
+    `;
+    card.onclick = () => switchCoin(c.coin_id, c.symbol);
+    grid.appendChild(card);
+  });
+}
+
+function formatPrice(p) {
+  if (p >= 1000) return p.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  if (p >= 1)    return p.toFixed(4);
+  return p.toFixed(6);
+}
+function fmtBig(v) {
+  if (!v) return 'N/A';
+  if (v >= 1e9) return '$'+(v/1e9).toFixed(2)+'B';
+  if (v >= 1e6) return '$'+(v/1e6).toFixed(2)+'M';
+  if (v >= 1e3) return '$'+(v/1e3).toFixed(1)+'K';
+  return '$'+v.toFixed(2);
+}
+
+// ── Build coin selector buttons ──────────────────────────────────────────────
+function buildSelector() {
+  const sel = document.getElementById('priceChartSelector');
+  COINS.forEach(([id, sym]) => {
+    const btn = document.createElement('button');
+    btn.className = 'coin-btn' + (id === selectedCoin ? ' active' : '');
+    btn.textContent = sym;
+    btn.onclick = () => switchCoin(id, sym);
+    sel.appendChild(btn);
+  });
+}
+
+async function switchCoin(coinId, symbol) {
+  selectedCoin = coinId;
+  document.querySelectorAll('.coin-btn').forEach(b => {
+    b.classList.toggle('active', b.textContent === symbol);
+  });
+  document.getElementById('chartTitle1').textContent = `◉ ${symbol} — Price (Live)`;
+  document.getElementById('chartTitle2').textContent = `◉ ${symbol} — Volume (Live)`;
+  await loadCharts(coinId);
+}
+
+// ── Charts ───────────────────────────────────────────────────────────────────
+async function loadCharts(coinId) {
+  const resp = await fetch(`/api/anomalies/${coinId}`);
+  const data = await resp.json();
+  if (!data.series) return;
+  const { timestamps, prices, volumes, anomaly_flags } = data.series;
+
+  const labels = timestamps.map(t => t.substr(11,5));
+  const aColors = anomaly_flags.map(f => f ? RED : 'transparent');
+  const aRadius = anomaly_flags.map(f => f ? 6 : 0);
+
+  // Price chart
+  if (pChart) pChart.destroy();
+  pChart = new Chart(document.getElementById('livePrice').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Price',
+          data: prices,
+          borderColor: CYAN,
+          backgroundColor: CYAN + '11',
+          borderWidth: 1.5,
+          fill: true,
+          tension: 0.3,
+          pointRadius: 0,
+        },
+        {
+          label: 'Anomaly',
+          data: prices.map((p,i) => anomaly_flags[i] ? p : null),
+          borderColor: 'transparent',
+          backgroundColor: RED,
+          pointBackgroundColor: RED,
+          pointBorderColor: '#fff',
+          pointRadius: aRadius,
+          pointBorderWidth: 1.5,
+          type: 'scatter',
+          showLine: false,
+        }
+      ]
+    },
+    options: chartOpts()
+  });
+
+  // Volume chart
+  if (vChart) vChart.destroy();
+  const avgVol = volumes.reduce((a,b)=>a+b,0)/volumes.length;
+  vChart = new Chart(document.getElementById('liveVolume').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Volume',
+        data: volumes,
+        backgroundColor: volumes.map(v => v > avgVol*2 ? RED+'bb' : CYAN+'44'),
+        borderRadius: 2,
+        borderWidth: 0,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: {display:false}, tooltip: { backgroundColor: '#0d1421', borderColor: '#00d4ff44', borderWidth: 1 } },
+      scales: {
+        x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } },
+        y: { grid: { color: 'rgba(0,212,255,0.04)' }, ticks: { maxTicksLimit: 4, callback: v => fmtBig(v) } }
+      }
+    }
+  });
+}
+
+function chartOpts() {
+  return {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: { backgroundColor: '#0d1421', borderColor: '#00d4ff44', borderWidth: 1 }
+    },
+    scales: {
+      x: { grid: { color: 'rgba(0,212,255,0.04)' }, ticks: { maxTicksLimit: 8 } },
+      y: { grid: { color: 'rgba(0,212,255,0.06)' }, ticks: { maxTicksLimit: 5 } }
+    }
+  };
+}
+
+// ── Anomaly table ─────────────────────────────────────────────────────────────
+async function loadAnomalyTable() {
+  const resp = await fetch('/api/anomalies');
+  const results = await resp.json();
+  const tbody = document.getElementById('anomalyTable');
+  const rows = [];
+  results.forEach(r => {
+    r.anomalies.forEach(a => {
+      rows.push({ symbol: r.symbol, ...a });
+    });
+  });
+  rows.sort((a,b) => b.timestamp.localeCompare(a.timestamp));
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No anomalies detected in current window</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.slice(0,20).map(a => `
+    <tr>
+      <td><span class="coin-symbol">${a.symbol}</span></td>
+      <td class="text-mono" style="font-size:11px;color:var(--text-dim);">${a.timestamp.substr(11,5)}</td>
+      <td class="price-val">$${formatPrice(a.price)}</td>
+      <td class="vol-val">${fmtBig(a.volume)}</td>
+      <td class="text-mono ${a.price_zscore > 0 ? 'text-red' : 'text-green'}">${a.price_zscore.toFixed(2)}σ</td>
+      <td class="text-mono ${a.volume_zscore > 0 ? 'text-red' : 'text-green'}">${a.volume_zscore.toFixed(2)}σ</td>
+      <td><span class="badge ${a.event_type === 'PUMP' ? 'badge-pump' : a.event_type === 'DUMP' ? 'badge-dump' : 'badge-anom'}">${a.event_type}</span></td>
+      <td><span class="badge badge-${a.severity}">${a.severity}</span></td>
+    </tr>
+  `).join('');
+}
+
+// ── Countdown timer ──────────────────────────────────────────────────────────
+let countdown = 15;
+setInterval(() => {
+  countdown--;
+  if (countdown <= 0) countdown = 15;
+  const bar = document.getElementById('countdownBar');
+  const num = document.getElementById('countdownNum');
+  if (bar) bar.style.width = (countdown/15*100)+'%';
+  if (num) num.textContent = countdown + 's';
+}, 1000);
+
+// ── Init + Auto refresh ──────────────────────────────────────────────────────
+buildSelector();
+(async () => {
+  await loadLiveGrid();
+  await loadCharts(selectedCoin);
+  await loadAnomalyTable();
+})();
+setInterval(async () => {
+  await loadLiveGrid();
+  await loadAnomalyTable();
+}, 15000);
+</script>
+{% endblock %}

@@ -1,0 +1,382 @@
+{% extends "base.html" %}
+{% block title %}Analytics — CryptoPulse{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <div class="page-title">ANOMALY ANALYTICS</div>
+    <div class="page-subtitle">DATA MINING · ISOLATION FOREST · STATISTICAL THRESHOLDING</div>
+  </div>
+  <div class="topbar-right">
+    <span class="clock"></span>
+    <button class="refresh-btn" onclick="runAnalysis()">▶ RUN ANALYSIS</button>
+  </div>
+</div>
+
+<!-- Coin selector -->
+<div class="card mb-24">
+  <div class="card-title">◈ Select Coin for Deep Analysis</div>
+  <div class="coin-selector" id="coinSelector"></div>
+</div>
+
+<!-- Selected coin analysis -->
+<div class="grid-2 mb-24">
+  <div class="card">
+    <div class="card-title" id="priceMiningTitle">◉ Price — Anomaly Detection</div>
+    <div class="chart-container" style="height:280px;"><canvas id="priceAnomalyChart"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="card-title" id="volMiningTitle">◉ Volume — Spike Detection</div>
+    <div class="chart-container" style="height:280px;"><canvas id="volAnomalyChart"></canvas></div>
+  </div>
+</div>
+
+<!-- Stats row -->
+<div class="stats-grid mb-24" id="coinStats">
+  <div class="stat-card cyan">
+    <div class="stat-label">Data Points</div>
+    <div class="stat-value" id="dataPoints">—</div>
+    <div class="stat-meta">Records analysed</div>
+  </div>
+  <div class="stat-card red">
+    <div class="stat-label">Anomalies Found</div>
+    <div class="stat-value" id="anomalyCount">—</div>
+    <div class="stat-meta">Combined detector</div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-label">Mean Price</div>
+    <div class="stat-value" style="font-size:20px;" id="meanPrice">—</div>
+    <div class="stat-meta">Window average</div>
+  </div>
+  <div class="stat-card orange">
+    <div class="stat-label">Price Std Dev</div>
+    <div class="stat-value" style="font-size:20px;" id="stdPrice">—</div>
+    <div class="stat-meta">Volatility measure</div>
+  </div>
+</div>
+
+<!-- All coins overview table -->
+<div class="card mb-24">
+  <div class="card-title">◧ Full Market Anomaly Scan</div>
+  <table class="price-table">
+    <thead>
+      <tr>
+        <th>Coin</th><th>Data Points</th><th>Anomalies</th>
+        <th>Mean Price</th><th>Std Dev</th><th>Mean Volume</th>
+        <th>Risk Level</th>
+      </tr>
+    </thead>
+    <tbody id="fullScanTable">
+      <tr><td colspan="7" class="empty-state">Click "RUN ANALYSIS" to scan all coins</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Graph Mining Section -->
+<div class="card mb-24">
+  <div class="card-title">◈ Graph Mining — Correlation Network</div>
+  <div id="graphLoading" style="text-align:center;padding:30px;font-family:var(--font-mono);font-size:12px;color:var(--text-dim);">
+    Click "RUN ANALYSIS" to run graph mining…
+  </div>
+  <div id="graphInsights" style="display:none;">
+    <div class="grid-2" style="margin-bottom:20px;">
+      <div>
+        <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-bottom:12px;letter-spacing:2px;">CORRELATION COMMUNITIES</div>
+        <ul class="cluster-list" id="communityList"></ul>
+      </div>
+      <div>
+        <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-bottom:12px;letter-spacing:2px;">HUB COINS (MARKET MOVERS)</div>
+        <table class="price-table">
+          <thead><tr><th>Coin</th><th>Degree</th><th>Centrality</th><th>Betweenness</th></tr></thead>
+          <tbody id="hubTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-bottom:12px;letter-spacing:2px;">
+      ⚠️ SUSPICIOUS CLUSTERS (HIGH CO-MOVEMENT)
+    </div>
+    <div id="suspiciousClusters"></div>
+
+    <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin:16px 0 12px;letter-spacing:2px;">
+      VOLUME PROPAGATION GRAPH
+    </div>
+    <div id="volPropagation" class="card" style="background:var(--bg-base);"></div>
+  </div>
+</div>
+
+<!-- Anomaly event log -->
+<div class="card">
+  <div class="card-title">◬ Detected Anomaly Events</div>
+  <div id="anomalyLog"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+Chart.defaults.color = '#5a7a9a';
+Chart.defaults.borderColor = 'rgba(0,212,255,0.08)';
+Chart.defaults.font.family = "'Share Tech Mono', monospace";
+Chart.defaults.font.size = 11;
+
+const CYAN = '#00d4ff', GREEN = '#00ff88', RED = '#ff3366', ORANGE = '#ff8800';
+const COINS = {{ tracked | tojson }};
+let selectedCoin = '{{ selected_coin }}';
+let pChart, vChart;
+
+function fmtP(v) {
+  if (!v && v !== 0) return '—';
+  if (v >= 10000) return '$'+v.toLocaleString('en-US',{maximumFractionDigits:0});
+  if (v >= 1)     return '$'+v.toFixed(4);
+  return '$'+v.toFixed(6);
+}
+function fmtV(v) {
+  if (!v) return '—';
+  if (v >= 1e9) return '$'+(v/1e9).toFixed(2)+'B';
+  if (v >= 1e6) return '$'+(v/1e6).toFixed(2)+'M';
+  return '$'+(v/1e3).toFixed(1)+'K';
+}
+
+// ── Build selector ────────────────────────────────────────────────────────────
+function buildSelector() {
+  const sel = document.getElementById('coinSelector');
+  COINS.forEach(([id, sym]) => {
+    const btn = document.createElement('button');
+    btn.className = 'coin-btn' + (id === selectedCoin ? ' active' : '');
+    btn.textContent = sym;
+    btn.onclick = () => loadCoinAnalysis(id, sym);
+    sel.appendChild(btn);
+  });
+}
+
+// ── Load single coin analysis ─────────────────────────────────────────────────
+async function loadCoinAnalysis(coinId, symbol) {
+  selectedCoin = coinId;
+  document.querySelectorAll('.coin-btn').forEach(b => b.classList.toggle('active', b.textContent === symbol));
+  document.getElementById('priceMiningTitle').textContent = `◉ ${symbol} — Price Anomaly Detection`;
+  document.getElementById('volMiningTitle').textContent   = `◉ ${symbol} — Volume Spike Detection`;
+
+  const resp = await fetch(`/api/anomalies/${coinId}`);
+  const data = await resp.json();
+  if (data.status !== 'ok') return;
+
+  // Stats
+  document.getElementById('dataPoints').textContent  = data.total_rows;
+  document.getElementById('anomalyCount').textContent = data.anomaly_count;
+  document.getElementById('meanPrice').textContent   = fmtP(data.mean_price).replace('$','');
+  document.getElementById('stdPrice').textContent    = fmtP(data.std_price).replace('$','');
+
+  const { timestamps, prices, volumes, anomaly_flags } = data.series;
+  const labels = timestamps.map(t => t.substr(0,16).replace('T',' '));
+
+  // Price chart with anomaly markers
+  if (pChart) pChart.destroy();
+  pChart = new Chart(document.getElementById('priceAnomalyChart').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Price',
+          data: prices,
+          borderColor: CYAN,
+          backgroundColor: CYAN + '0a',
+          borderWidth: 1.5,
+          fill: true,
+          tension: 0.35,
+          pointRadius: 0,
+        },
+        {
+          label: 'Anomaly',
+          data: prices.map((p,i) => anomaly_flags[i] ? p : null),
+          type: 'scatter',
+          pointBackgroundColor: RED,
+          pointBorderColor: '#fff',
+          pointRadius: anomaly_flags.map(f => f ? 7 : 0),
+          pointBorderWidth: 1.5,
+          showLine: false,
+        }
+      ]
+    },
+    options: baseOpts()
+  });
+
+  // Volume bar chart
+  if (vChart) vChart.destroy();
+  const avgVol = volumes.reduce((a,b)=>a+b,0)/volumes.length;
+  vChart = new Chart(document.getElementById('volAnomalyChart').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Volume',
+        data: volumes,
+        backgroundColor: volumes.map((v,i) => {
+          if (anomaly_flags[i]) return RED + 'cc';
+          if (v > avgVol * 2)   return ORANGE + 'aa';
+          return CYAN + '44';
+        }),
+        borderRadius: 2,
+        borderWidth: 0,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: {display:false}, tooltip: { backgroundColor: '#0d1421', borderColor: '#00d4ff44', borderWidth: 1 } },
+      scales: {
+        x: { grid: {display:false}, ticks: { maxTicksLimit: 8 } },
+        y: { grid: { color: 'rgba(0,212,255,0.04)' }, ticks: { maxTicksLimit: 4, callback: v => fmtV(v) } }
+      }
+    }
+  });
+
+  // Anomaly log
+  const log = document.getElementById('anomalyLog');
+  if (!data.anomalies.length) {
+    log.innerHTML = '<div class="empty-state">No anomalies detected for this coin in the current window.</div>';
+    return;
+  }
+  log.innerHTML = data.anomalies.map(a => `
+    <div class="alert-item ${a.event_type === 'PUMP' ? 'pump-alert' : a.event_type === 'DUMP' ? 'dump-alert' : 'anom-alert'}">
+      <span class="alert-icon">${a.event_type === 'PUMP' ? '🚀' : a.event_type === 'DUMP' ? '📉' : '⚠️'}</span>
+      <div style="flex:1;">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">
+          <span class="coin-symbol">${symbol}</span>
+          <span class="badge ${ a.event_type === 'PUMP' ? 'badge-pump' : a.event_type === 'DUMP' ? 'badge-dump' : 'badge-anom'}">${a.event_type}</span>
+          <span class="badge badge-${a.severity}">${a.severity}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-family:var(--font-mono);font-size:11px;color:var(--text-dim);">
+          <div>Price: <span style="color:var(--text-bright);">${fmtP(a.price)}</span></div>
+          <div>Volume: <span style="color:var(--text-bright);">${fmtV(a.volume)}</span></div>
+          <div>P-ZScore: <span class="${a.price_zscore > 0 ? 'text-red' : 'text-green'}">${a.price_zscore.toFixed(2)}σ</span></div>
+          <div>V-ZScore: <span class="${a.volume_zscore > 0 ? 'text-red' : 'text-green'}">${a.volume_zscore.toFixed(2)}σ</span></div>
+        </div>
+        <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:4px;">
+          ISO Score: ${a.iso_score.toFixed(4)} · Stat: ${a.stat_anomaly ? '✓' : '✗'} · ISO: ${a.iso_anomaly ? '✓' : '✗'}
+        </div>
+      </div>
+      <div class="alert-time">${a.timestamp.substr(0,16).replace('T',' ')}</div>
+    </div>
+  `).join('');
+}
+
+// ── Full market scan ──────────────────────────────────────────────────────────
+async function runAnalysis() {
+  const tbody = document.getElementById('fullScanTable');
+  tbody.innerHTML = '<tr><td colspan="7" class="empty-state">⏳ Running analysis on all coins…</td></tr>';
+
+  const resp = await fetch('/api/anomalies');
+  const results = await resp.json();
+
+  tbody.innerHTML = results.map(r => {
+    if (r.status !== 'ok') return `<tr><td colspan="7" style="color:var(--text-dim);padding:10px 12px;">${r.symbol} — insufficient data</td></tr>`;
+    const risk = r.anomaly_count === 0 ? 'CLEAN' : r.anomaly_count < 3 ? 'LOW' : r.anomaly_count < 8 ? 'MEDIUM' : 'HIGH';
+    const riskClass = risk === 'CLEAN' ? 'badge-clean' : risk === 'LOW' ? 'badge-medium' : risk === 'MEDIUM' ? 'badge-dump' : 'badge-pump';
+    return `
+      <tr>
+        <td><span class="coin-symbol">${r.symbol}</span></td>
+        <td class="text-mono">${r.total_rows}</td>
+        <td class="text-mono ${r.anomaly_count > 5 ? 'text-red' : r.anomaly_count > 0 ? 'text-orange' : 'text-green'}">${r.anomaly_count}</td>
+        <td class="price-val">${fmtP(r.mean_price)}</td>
+        <td class="text-mono" style="color:var(--text-dim);">${fmtP(r.std_price)}</td>
+        <td class="vol-val">${fmtV(r.mean_volume)}</td>
+        <td><span class="badge ${riskClass}">${risk}</span></td>
+      </tr>`;
+  }).join('');
+
+  // Graph mining
+  await runGraphMining();
+}
+
+// ── Graph mining ──────────────────────────────────────────────────────────────
+async function runGraphMining() {
+  document.getElementById('graphLoading').textContent = '⏳ Running graph analysis…';
+  const resp = await fetch('/api/graph');
+  const g = await resp.json();
+
+  document.getElementById('graphLoading').style.display = 'none';
+  document.getElementById('graphInsights').style.display = 'block';
+
+  // Communities
+  const commList = document.getElementById('communityList');
+  commList.innerHTML = (g.communities || []).map((c, i) => `
+    <li class="cluster-item">
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);margin-bottom:6px;">Community ${i+1}</div>
+      <div class="cluster-coins">${c.map(coin => `<span class="cluster-coin">${coin.toUpperCase().replace('-2','')}</span>`).join('')}</div>
+    </li>
+  `).join('') || '<li class="cluster-item">No communities detected (insufficient data)</li>';
+
+  // Hub table
+  document.getElementById('hubTable').innerHTML = (g.hub_coins || []).map(h => `
+    <tr>
+      <td class="coin-symbol">${h.coin.toUpperCase().replace('-2','')}</td>
+      <td class="text-mono">${h.degree}</td>
+      <td class="text-mono text-cyan">${h.degree_centrality.toFixed(3)}</td>
+      <td class="text-mono text-orange">${h.betweenness_centrality.toFixed(3)}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="4" class="empty-state">No hubs detected</td></tr>';
+
+  // Suspicious clusters
+  const sc = document.getElementById('suspiciousClusters');
+  if (!g.suspicious_clusters || !g.suspicious_clusters.length) {
+    sc.innerHTML = '<div style="font-family:var(--font-mono);font-size:12px;color:var(--green);padding:10px 0;">✓ No suspicious clusters detected in current window.</div>';
+  } else {
+    sc.innerHTML = g.suspicious_clusters.map(c => `
+      <div class="cluster-item suspicious">
+        <div style="font-family:var(--font-mono);font-size:12px;color:var(--red);margin-bottom:6px;">
+          ⚠️ ${c.suspicious_reason}
+        </div>
+        <div class="cluster-coins">${c.coins.map(coin => `<span class="cluster-coin">${coin.toUpperCase().replace('-2','')}</span>`).join('')}</div>
+        <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:6px;">
+          Avg correlation: ${c.avg_correlation} · ${c.edge_count} edges · ${c.size} coins
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // Volume propagation
+  const vp = g.volume_propagation;
+  const vpEl = document.getElementById('volPropagation');
+  if (!vp || !vp.edge_count) {
+    vpEl.innerHTML = '<div style="font-family:var(--font-mono);font-size:12px;color:var(--text-dim);padding:12px;">No volume propagation patterns detected.</div>';
+  } else {
+    const infl = vp.influencers.map(([s,n]) => `<span class="cluster-coin">${s} (→${n})</span>`).join('');
+    const foll = vp.followers.map(([s,n]) => `<span class="cluster-coin">${s} (←${n})</span>`).join('');
+    vpEl.innerHTML = `
+      <div style="font-family:var(--font-mono);font-size:11px;margin-bottom:8px;color:var(--text-dim);">
+        ${vp.edge_count} propagation edges detected
+      </div>
+      <div style="margin-bottom:8px;">
+        <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);">TOP INFLUENCERS (spike first): </span>
+        <div class="cluster-coins" style="margin-top:4px;">${infl || 'None'}</div>
+      </div>
+      <div>
+        <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);">MOST FOLLOWED (spike after): </span>
+        <div class="cluster-coins" style="margin-top:4px;">${foll || 'None'}</div>
+      </div>
+    `;
+  }
+}
+
+function baseOpts() {
+  return {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: { backgroundColor: '#0d1421', borderColor: '#00d4ff44', borderWidth: 1 }
+    },
+    scales: {
+      x: { grid: { color: 'rgba(0,212,255,0.04)' }, ticks: { maxTicksLimit: 6 } },
+      y: { grid: { color: 'rgba(0,212,255,0.06)' }, ticks: { maxTicksLimit: 5 } }
+    }
+  };
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+buildSelector();
+const initSym = COINS.find(([id]) => id === selectedCoin)?.[1] || 'BTC';
+loadCoinAnalysis(selectedCoin, initSym);
+runAnalysis();
+</script>
+{% endblock %}

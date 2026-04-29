@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Admin Panel — CryptoPulse{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <div>
+    <div class="page-title">ADMIN PANEL</div>
+    <div class="page-subtitle">USER MANAGEMENT &amp; SYSTEM OVERVIEW</div>
+  </div>
+  <div class="topbar-right">
+    <span class="badge-live" style="background:rgba(127,77,221,0.15);border-color:#7f4ddd;color:#b48dff;">⬡ ADMIN</span>
+    <span class="clock"></span>
+  </div>
+</div>
+
+<!-- Stats -->
+<div class="stats-grid mb-24" style="grid-template-columns:repeat(4,1fr)">
+  <div class="stat-card cyan">
+    <div class="stat-label">Total Users</div>
+    <div class="stat-value">{{ user_stats.total }}</div>
+    <div class="stat-meta">Registered accounts</div>
+  </div>
+  <div class="stat-card orange">
+    <div class="stat-label">Admin Users</div>
+    <div class="stat-value">{{ user_stats.admins }}</div>
+    <div class="stat-meta">Admin privileges</div>
+  </div>
+  <div class="stat-card red">
+    <div class="stat-label">Total Alerts</div>
+    <div class="stat-value">{{ alert_stats.total }}</div>
+    <div class="stat-meta">{{ alert_stats.pumps }} pumps · {{ alert_stats.dumps }} dumps</div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-label">Coins Tracked</div>
+    <div class="stat-value">{{ latest|length }}</div>
+    <div class="stat-meta">Live market feeds</div>
+  </div>
+</div>
+
+<!-- User table -->
+<div class="card mb-24">
+  <div class="card-title">◈ Registered Users</div>
+  <table class="price-table">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Username</th>
+        <th>Email</th>
+        <th>Role</th>
+        <th>Joined</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+      <tr id="user-row-{{ u.id }}">
+        <td class="text-mono text-dim">{{ u.id }}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="avatar-circle">{{ u.username[:2]|upper }}</div>
+            <span style="color:var(--text-bright);font-weight:600">{{ u.username }}</span>
+          </div>
+        </td>
+        <td class="text-mono" style="font-size:12px;color:var(--text-dim)">{{ u.email }}</td>
+        <td>
+          <span class="badge {% if u.role == 'admin' %}badge-pump{% else %}badge-clean{% endif %}">
+            {{ u.role|upper }}
+          </span>
+        </td>
+        <td class="text-mono" style="font-size:11px;color:var(--text-dim)">{{ u.created_at[:10] }}</td>
+        <td>
+          {% if u.id != current_user.id %}
+          <button class="action-btn action-btn-red" style="padding:4px 12px;font-size:11px"
+                  onclick="deleteUser({{ u.id }}, '{{ u.username }}')">
+            ✕ Delete
+          </button>
+          {% else %}
+          <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">(you)</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Live market snapshot -->
+<div class="card mb-24">
+  <div class="card-title">◉ Live Market Snapshot</div>
+  <table class="price-table">
+    <thead>
+      <tr><th>Asset</th><th>Price (USD)</th><th>24h %</th><th>Volume</th><th>Market Cap</th></tr>
+    </thead>
+    <tbody>
+      {% for coin in latest %}
+      <tr>
+        <td>
+          <span class="coin-symbol">{{ coin.symbol }}</span>
+          <span class="coin-name" style="margin-left:6px">{{ coin.name }}</span>
+        </td>
+        <td class="price-val">${{ "%.4f"|format(coin.price) }}</td>
+        <td class="{{ 'pct-pos' if coin.price_change_pct >= 0 else 'pct-neg' }}">
+          {{ "%+.2f"|format(coin.price_change_pct) }}%
+        </td>
+        <td class="vol-val">${{ "{:,.0f}".format(coin.volume_24h) }}</td>
+        <td class="vol-val">${{ "{:,.0f}".format(coin.market_cap) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Quick links -->
+<div class="card">
+  <div class="card-title">◬ Quick Actions</div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap">
+    <a href="/"          class="action-btn action-btn-blue">◈ Dashboard</a>
+    <a href="/live"      class="action-btn action-btn-blue">◉ Live Feed</a>
+    <a href="/analytics" class="action-btn action-btn-blue">◧ Analytics</a>
+    <a href="/alerts"    class="action-btn action-btn-orange">◬ Alerts</a>
+    <a href="/profile"   class="action-btn action-btn-purple">⬡ My Profile</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function deleteUser(id, name) {
+  if (!confirm('Delete user "' + name + '"? This cannot be undone.')) return;
+  fetch('/admin/delete_user/' + id, { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        const row = document.getElementById('user-row-' + id);
+        row.style.opacity = '0'; row.style.transition = 'opacity .3s';
+        setTimeout(() => row.remove(), 300);
+      } else {
+        alert(d.error || 'Failed to delete user.');
+      }
+    });
+}
+</script>
+{% endblock %}
